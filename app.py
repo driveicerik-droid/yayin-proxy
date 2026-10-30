@@ -1,32 +1,26 @@
-import os
 import re
-import hmac
 from urllib.parse import urljoin, urlsplit, quote
 
 import requests
-from flask import Flask, Response, request, abort, stream_with_context
+from flask import Flask, Response, request, stream_with_context
 
 app = Flask(__name__)
 
 ORIGIN = "https://live-tr-next.spacetoongo.com"
 PLAYLIST = "/ST_TR_NEXT/hls/h7qefeiwfbjn1.m3u8"
-SECRET = os.environ["ACCESS_KEY"]
 
 
 @app.get("/")
 def home():
-    return "Yayın proxy hazır."
+    return "Yayın proxy hazır. İzlemek için /watch.m3u8 adresini aç."
 
 
 @app.get("/watch.m3u8")
 @app.get("/stream/<path:resource>")
 def proxy(resource=None):
-    key = request.args.get("key", "")
-    if not hmac.compare_digest(key, SECRET):
-        abort(403)
-
     path = "/" + resource if resource else PLAYLIST
     upstream = ORIGIN + path
+
     query = request.args.get("q", "")
     if query:
         upstream += "?" + query
@@ -55,30 +49,31 @@ def proxy(resource=None):
     if is_playlist:
         def local_url(value):
             absolute = urlsplit(urljoin(upstream, value))
+
             if (
                 absolute.scheme != "https"
                 or absolute.netloc != urlsplit(ORIGIN).netloc
             ):
                 raise ValueError("Farklı yayın sunucusu")
 
-            target = (
-                "/stream"
-                + quote(absolute.path, safe="/%")
-                + "?key="
-                + quote(SECRET, safe="")
-            )
+            target = "/stream" + quote(absolute.path, safe="/%")
+
             if absolute.query:
-                target += "&q=" + quote(absolute.query, safe="")
+                target += "?q=" + quote(absolute.query, safe="")
+
             return target
 
         try:
             playlist = result.content.decode("utf-8-sig")
+
             if not playlist.lstrip().startswith("#EXTM3U"):
                 return "Geçerli yayın listesi alınamadı.", 502
 
             lines = []
+
             for line in playlist.splitlines():
                 line = line.strip()
+
                 if line and not line.startswith("#"):
                     line = local_url(line)
                 elif line.startswith("#"):
@@ -87,6 +82,7 @@ def proxy(resource=None):
                         lambda match: 'URI="' + local_url(match[1]) + '"',
                         line,
                     )
+
                 lines.append(line)
 
             return Response(
